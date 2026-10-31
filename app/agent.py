@@ -113,10 +113,89 @@ def _parse(raw: str) -> dict:
 _DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 
 
+import re
+import unicodedata
+
+def _norm(s: str) -> str:
+    """Lowercase, drop the nukta dot, so हज़ार and हजार match the same key."""
+    return unicodedata.normalize("NFD", s.lower()).replace("\u093c", "")
+
+_UNITS = {_norm(k): v for k, v in {
+    "ek": 1, "एक": 1, "do": 2, "दो": 2, "teen": 3, "tin": 3, "तीन": 3, "char": 4, "chaar": 4, "चार": 4,
+    "paanch": 5, "panch": 5, "pach": 5, "पांच": 5, "पाँच": 5, "chhe": 6, "chhah": 6, "che": 6, "छह": 6, "छः": 6, "छे": 6,
+    "saat": 7, "सात": 7, "aath": 8, "aat": 8, "आठ": 8, "nau": 9, "नौ": 9, "das": 10, "dus": 10, "दस": 10,
+    "gyarah": 11, "gyara": 11, "ग्यारह": 11, "barah": 12, "bara": 12, "baarah": 12, "बारह": 12,
+    "terah": 13, "तेरह": 13, "chaudah": 14, "chauda": 14, "चौदह": 14, "pandrah": 15, "pandra": 15, "पंद्रह": 15,
+    "solah": 16, "sola": 16, "सोलह": 16, "satrah": 17, "सत्रह": 17, "atharah": 18, "athara": 18, "अठारह": 18,
+    "unnis": 19, "unnees": 19, "उन्नीस": 19, "bees": 20, "bis": 20, "बीस": 20, "pachchis": 25, "pachees": 25, "पच्चीस": 25,
+    "tees": 30, "tis": 30, "तीस": 30, "chalis": 40, "chalees": 40, "चालीस": 40, "pachas": 50, "pachaas": 50, "पचास": 50,
+    "saath": 60, "साठ": 60, "sattar": 70, "सत्तर": 70, "assi": 80, "अस्सी": 80, "nabbe": 90, "नब्बे": 90,
+}.items()}
+_HALVES = {_norm(k): v for k, v in {"dedh": 1.5, "derh": 1.5, "डेढ़": 1.5, "डेढ": 1.5,
+                                     "dhai": 2.5, "dhaai": 2.5, "ढाई": 2.5}.items()}
+_PLUS_HALF = {_norm(k) for k in ["sadhe", "saadhe", "saade", "साढ़े", "साढे"]}
+_MULT = {_norm(k): v for k, v in {
+    "sau": 100, "सौ": 100, "hundred": 100,
+    "hazaar": 1000, "hazar": 1000, "hajar": 1000, "hajaar": 1000, "हज़ार": 1000, "हजार": 1000, "thousand": 1000,
+    "lakh": 100000, "lac": 100000, "लाख": 100000,
+}.items()}
+_RUPEE = {_norm(k) for k in ["rupaye", "rupaya", "rupay", "rupees", "rupee", "rs", "inr", "₹",
+                             "रुपये", "रुपए", "रुपया", "रूपये", "रूपए"]}
+_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+
+
 def amounts_in(text: str) -> tuple:
-    """Rupee amounts in what the customer said, e.g. '₹100 ka payment' -> (100,)."""
-    t = text.translate(_DEVANAGARI_DIGITS).replace(",", "")
-    return tuple(int(x) for x in re.findall(r"\d+", t) if 10 <= int(x) <= 1_000_000)
+    """Rupee amounts in what the customer said, in digits or Hindi/Hinglish words.
+    '₹100' -> (100,), 'do hazaar' -> (2000,), 'बारह सौ रुपये' -> (1200,), 'sau rupaye' -> (100,)."""
+    t = _norm(text.translate(_DIGITS)).replace(",", "")
+    t = re.sub(r"(₹|rs\.?)\s*(?=\d)", " ", t)          # '₹2000' / 'rs2000' -> ' 2000'
+    toks = [w.strip(".:;'\"()") for w in re.split(r"[\s?!।|/]+", t)]
+    toks = [w for w in toks if w]
+    found, total, cur, active, plus_half = [], 0.0, 0.0, False, False
+
+    def flush():
+        nonlocal total, cur, active, plus_half
+        if active:
+            amount = int(round(total + cur))
+            if 10 <= amount <= 10_000_000:
+                found.append(amount)
+        total, cur, active, plus_half = 0.0, 0.0, False, False
+
+    for i, w in enumerate(toks):
+        nxt = toks[i + 1] if i + 1 < len(toks) else ""
+        leads = nxt in _MULT or nxt in _RUPEE           # a number word only counts before sau/hazaar/rupaye
+        if w.replace(".", "", 1).isdigit():
+            n = float(w)
+            if nxt in _MULT:
+                cur, active = n, True
+            else:
+                flush(); cur, active = n, True; flush()
+        elif w in _PLUS_HALF and (nxt in _UNITS):
+            plus_half = True
+        elif w in _UNITS and (leads or active):
+            v = _UNITS[w] + (0.5 if plus_half else 0)
+            plus_half = False
+            if active and nxt not in _MULT:
+                cur += v                                  # 'chaar sau PACHAS' -> 450
+            else:
+                total, cur, active = total + (cur if active else 0), v, True
+        elif w in _HALVES and nxt in _MULT:
+            cur, active = _HALVES[w], True
+        elif w in _MULT:
+            m = _MULT[w]
+            if m == 100:
+                cur = (cur or 1) * 100
+            else:
+                total += (cur or 1) * m
+                cur = 0.0
+            active = True
+        elif w in _RUPEE:
+            flush()
+        else:
+            flush()
+    flush()
+    return tuple(dict.fromkeys(found))
+
 
 
 def _not_found_reply(said: tuple) -> dict | None:
