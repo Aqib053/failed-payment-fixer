@@ -1,6 +1,7 @@
 """Sarvam AI: speech to text (Saaras) and text to speech (Bulbul).
 Replies are cached on disk, so repeating the demo costs no extra credits."""
 import base64
+import os
 import hashlib
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from app import config
 
 BASE = "https://api.sarvam.ai"
 HEADERS = {"api-subscription-key": config.SARVAM_API_KEY}
-CACHE = Path("audio_cache")
+CACHE = Path("/tmp/audio_cache" if os.getenv("VERCEL") else "audio_cache")
 CACHE.mkdir(exist_ok=True)
 
 
