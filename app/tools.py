@@ -10,11 +10,12 @@ import contextvars
 
 # Amounts the customer mentioned in the current message (set by the agent per request).
 MENTIONED_AMOUNTS: contextvars.ContextVar[tuple] = contextvars.ContextVar("mentioned_amounts", default=())
+LAST_MENTIONED = [()]  # backup channel for the same amounts
 
 
 def _mismatch(t: dict) -> dict | None:
     """Block actions on a payment whose amount the customer never mentioned."""
-    said = MENTIONED_AMOUNTS.get()
+    said = MENTIONED_AMOUNTS.get() or LAST_MENTIONED[0]
     amount = int(float(t["amount"]))
     if said and amount not in said:
         return {"error": f"Customer mentioned Rs {', '.join(map(str, said))}, but {t['id']} is Rs {amount}. "
@@ -59,25 +60,40 @@ def _ticket(txn_id: str, kind: str, summary: str, amount: float = 0) -> str:
     return f"PTM-{5000 + row['id']}"
 
 
+STATUS_MEANING = {
+    "success": "reached the payee",
+    "pending": "money debited but not yet credited to the payee",
+    "refund_pending": "payment failed, refund not yet returned",
+    "reversed": "already refunded to the customer (with compensation if it was late)",
+    "repushed": "re-pushed by Shield, the money has gone through",
+}
+
+
 @tool
-def find_transactions(amount: float | None = None) -> dict:
+def find_transactions(amount: float | None = None, payee: str | None = None) -> dict:
     """Find the customer's recent UPI payments, newest first.
-    Pass amount (in rupees) if the customer mentioned one. If nothing matches
-    that amount, the most recent payments are returned instead."""
-    def fetch(amt):
+    Pass amount (in rupees) if the customer mentioned one, and/or payee if they named
+    a person or shop (for example "Priya" or "Swiggy"). If nothing matches,
+    the most recent payments are returned instead."""
+    def fetch(amt=None, name=None):
         q = (db.table("transactions").select("id,amount,payee,status,created_at")
              .eq("customer", config.CUSTOMER_ID).order("created_at", desc=True).limit(10))
         if amt:
             q = q.eq("amount", amt)
-        return [{"txn_id": r["id"], "amount": r["amount"], "payee": r["payee"],
-                 "status": r["status"], "time": r["created_at"]} for r in q.execute().data]
+        if name:
+            q = q.ilike("payee", f"%{name.strip()}%")
+        return [{"txn_id": r["id"], "amount": r["amount"], "payee": r["payee"], "status": r["status"],
+                 "status_meaning": STATUS_MEANING.get(r["status"], r["status"]), "time": r["created_at"]}
+                for r in q.execute().data]
 
-    payments = fetch(amount)
+    payments = fetch(amount, payee)
     if payments:
-        return {"matched_amount": bool(amount), "payments": payments}
-    return {"matched_amount": False,
-            "note": f"No payment of {amount}. Showing recent payments instead.",
-            "payments": fetch(None)}
+        return {"matched": True, "payments": payments}
+    asked = " and ".join(x for x in [f"Rs {amount}" if amount else "", payee or ""] if x)
+    return {"matched": False,
+            "note": (f"No payment matching {asked}. Do NOT assume it is one of the payments below. "
+                     "Tell the customer it was not found and ask which payment they mean."),
+            "recent_payments": fetch()}
 
 
 @tool
@@ -100,6 +116,8 @@ def raise_dispute(txn_id: str) -> dict:
     """Raise a dispute with the bank for a stuck payment that is still within
     its deadline. Returns the ticket number and the auto-refund date."""
     t = _get(txn_id)
+    if (blocked := _mismatch(t)):
+        return blocked
     dl = _deadline(t)
     ticket = _ticket(t["id"], "dispute", f"Stuck at: {t['stage']}")
     return {"ticket": ticket, "auto_refund_by": _en(dl), "auto_refund_by_hindi": _hi(dl)}
@@ -120,8 +138,6 @@ def escalate_to_human(txn_id: str, summary: str) -> dict:
     """Send a late or unusual case to a human agent, with a short summary.
     Returns the ticket number."""
     t = _get(txn_id)
-    if (blocked := _mismatch(t)):
-        return blocked
     if (blocked := _mismatch(t)):
         return blocked
     return {"ticket": _ticket(t["id"], "escalation", summary[:300])}

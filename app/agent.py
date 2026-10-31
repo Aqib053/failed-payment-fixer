@@ -14,7 +14,8 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app import config
-from app.tools import MENTIONED_AMOUNTS, TOOLS
+from app import tools as _tools
+from app.tools import MENTIONED_AMOUNTS, TOOLS, find_transactions
 
 
 @tool
@@ -118,6 +119,20 @@ def amounts_in(text: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", t) if 10 <= int(x) <= 1_000_000)
 
 
+def _not_found_reply(said: tuple) -> dict | None:
+    """If the customer named an amount that matches none of their payments, answer directly."""
+    data = find_transactions.invoke({})
+    rows = data.get("payments") or data.get("recent_payments") or []
+    if any(int(float(r["amount"])) in said for r in rows):
+        return None
+    recent = ", ".join(f"Rs {int(float(r['amount']))} {r['payee']}" for r in rows[:2])
+    show = f"Mujhe Rs {said[0]} ka koi payment nahi mila."
+    if recent:
+        show += f" Aapke recent payments: {recent}. Kaunsa payment check karun?"
+    return {"show": _rupee(show), "say": _rupee(show),
+            "steps": [{"tool": "find_transactions", "args": {"amount": said[0]}}]}
+
+
 def run_resolver(message: str, session_id: str) -> dict:
     cfg = {"configurable": {"thread_id": session_id}}
     before = len(resolver.get_state(cfg).values.get("messages", []))
@@ -125,6 +140,12 @@ def run_resolver(message: str, session_id: str) -> dict:
     said = amounts_in(message)
     hint = (f"\n\n[Note: customer mentioned amount(s): {', '.join(map(str, said))}. "
             "Pass it to find_transactions and only act on a payment with this amount.]") if said else ""
+    if said:
+        early = _not_found_reply(said)
+        if early:
+            resolver.update_state(cfg, {"messages": [HumanMessage(message), AIMessage(early["show"])]})
+            return {**early, "seconds": round(time.perf_counter() - start, 1)}
+    _tools.LAST_MENTIONED[0] = said
     token = MENTIONED_AMOUNTS.set(said)
     try:
         result = resolver.invoke({"messages": [HumanMessage(message + hint)]}, cfg)
