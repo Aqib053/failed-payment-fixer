@@ -16,6 +16,7 @@ def _need(name: str) -> str:
 SUPABASE_URL = _need("SUPABASE_URL")
 SUPABASE_KEY = _need("SUPABASE_KEY")
 LLM_MODEL = os.getenv("LLM_MODEL", "google_genai:gemini-2.5-flash")
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "")
 
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
 SARVAM_STT_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v3")

@@ -46,15 +46,24 @@ def _ticket(txn_id: str, kind: str, summary: str, amount: float = 0) -> str:
 
 
 @tool
-def find_transactions(amount: float | None = None) -> list[dict]:
+def find_transactions(amount: float | None = None) -> dict:
     """Find the customer's recent UPI payments, newest first.
-    Pass amount (in rupees) if the customer mentioned one."""
-    q = (db.table("transactions").select("id,amount,payee,status,created_at")
-         .eq("customer", config.CUSTOMER_ID).order("created_at", desc=True).limit(10))
-    if amount:
-        q = q.eq("amount", amount)
-    return [{"txn_id": r["id"], "amount": r["amount"], "payee": r["payee"],
-             "status": r["status"], "time": r["created_at"]} for r in q.execute().data]
+    Pass amount (in rupees) if the customer mentioned one. If nothing matches
+    that amount, the most recent payments are returned instead."""
+    def fetch(amt):
+        q = (db.table("transactions").select("id,amount,payee,status,created_at")
+             .eq("customer", config.CUSTOMER_ID).order("created_at", desc=True).limit(10))
+        if amt:
+            q = q.eq("amount", amt)
+        return [{"txn_id": r["id"], "amount": r["amount"], "payee": r["payee"],
+                 "status": r["status"], "time": r["created_at"]} for r in q.execute().data]
+
+    payments = fetch(amount)
+    if payments:
+        return {"matched_amount": bool(amount), "payments": payments}
+    return {"matched_amount": False,
+            "note": f"No payment of {amount}. Showing recent payments instead.",
+            "payments": fetch(None)}
 
 
 @tool

@@ -4,7 +4,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.agent import run_resolver
+from app.agent import run_resolver, to_devanagari
 from app.voice import speech_to_text, text_to_speech
 
 app = FastAPI(title="Failed Payment Fixer")
@@ -19,7 +19,8 @@ class ChatIn(BaseModel):
 async def _answer(message: str, session_id: str, speak: bool) -> dict:
     result = await run_in_threadpool(run_resolver, message, session_id)
     result["audio"] = None
-    if speak and result["say"]:
+    if speak and result["show"]:
+        result["say"] = await run_in_threadpool(to_devanagari, result["show"])
         try:
             result["audio"] = await text_to_speech(result["say"])
         except httpx.HTTPError:

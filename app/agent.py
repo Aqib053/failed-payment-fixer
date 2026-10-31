@@ -18,10 +18,10 @@ from app.tools import TOOLS
 
 
 @tool
-def reply(show: str, say: str) -> str:
+def reply(show: str) -> str:
     """Send the final answer to the customer. Call this exactly once, alone, as the last step.
-    show: simple Hindi in Roman English letters (Hinglish), max 2 short sentences.
-    say: the same message in Devanagari script, for the Hindi voice."""
+    show: simple Hindi written ONLY in English letters (Hinglish), max 2 short sentences.
+    Write money as Rs 2000 (no special symbols)."""
     return "sent"
 
 
@@ -32,7 +32,7 @@ Work like this: find the payment (use the amount if they said one), check its st
 - Deadline passed: calc_compensation, then escalate_to_human.
 Never invent payments, dates or ticket numbers. Use only what the tools return.
 Finish by calling the `reply` tool once, with the amount, date and ticket number in it.
-Example show: "Aapke ₹2000 31 October tak wapas aa jayenge. Shikayat PTM-5001 darj ho gayi hai." """
+Example show: "Aapke Rs 2000 31 October tak wapas aa jayenge. Shikayat PTM-5001 darj ho gayi hai." """
 
 ALL_TOOLS = [*TOOLS, reply]
 
@@ -41,7 +41,16 @@ class State(TypedDict):
     messages: Annotated[list, add_messages]
 
 
-llm = init_chat_model(config.LLM_MODEL, temperature=0).bind_tools(ALL_TOOLS)
+def _model(name: str):
+    """Reasoning models (gpt-5, o-series) only accept the default temperature."""
+    fixed = any(k in name for k in ("gpt-5", ":o1", ":o3", ":o4"))
+    return init_chat_model(name) if fixed else init_chat_model(name, temperature=0)
+
+
+primary = _model(config.LLM_MODEL)
+backups = [_model(config.LLM_FALLBACK_MODEL)] if config.LLM_FALLBACK_MODEL else []
+llm = primary.bind_tools(ALL_TOOLS).with_fallbacks([b.bind_tools(ALL_TOOLS) for b in backups])
+base_llm = primary.with_fallbacks(backups)
 
 
 def call_model(state: State) -> dict:
@@ -70,6 +79,24 @@ def _text(content) -> str:
     return str(content)
 
 
+def _rupee(text: str) -> str:
+    """Turn 'Rs 2000' / 'Rs. 2000' / 'INR 2000' into '₹2000' for display."""
+    return re.sub(r"\b(?:Rs\.?|INR)\s?(?=\d)", "₹", text)
+
+
+def to_devanagari(text: str) -> str:
+    """Rewrite a Hinglish reply in Devanagari so the Hindi voice reads it naturally.
+    A plain text call (no tools, no JSON), so Hindi script can't break parsing."""
+    prompt = ("Rewrite this Hindi sentence, which is written in English letters, in Devanagari script. "
+              "Keep numbers, ₹ amounts, dates, ticket IDs and brand names exactly as they are. "
+              "Output only the rewritten sentence.\n\n" + text)
+    try:
+        out = _text(base_llm.invoke(prompt).content).strip()
+        return out or text
+    except Exception:
+        return text  # voice still works, just less natural
+
+
 def _parse(raw: str) -> dict:
     """Fallback if a model answers in plain text instead of calling `reply`."""
     raw = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.M).strip()
@@ -92,8 +119,9 @@ def run_resolver(message: str, session_id: str) -> dict:
     steps = [{"tool": c["name"], "args": c["args"]} for c in calls if c["name"] != "reply"]
     final = next((c["args"] for c in reversed(calls) if c["name"] == "reply"), None)
     if final:
-        show = str(final.get("show", "")).strip()
-        answer = {"show": show, "say": str(final.get("say") or show).strip()}
+        show = _rupee(str(final.get("show", "")).strip())
+        answer = {"show": show, "say": show}
     else:
         answer = _parse(_text(new[-1].content))
+        answer["show"] = _rupee(answer["show"])
     return {**answer, "steps": steps, "seconds": round(time.perf_counter() - start, 1)}
