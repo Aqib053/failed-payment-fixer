@@ -1,3 +1,5 @@
+import importlib
+
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -5,6 +7,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.agent import run_resolver, to_devanagari
+from app.shield import run_shift
+from app.shield import state as shield_state
 from app.voice import speech_to_text, text_to_speech
 
 app = FastAPI(title="Failed Payment Fixer")
@@ -53,6 +57,32 @@ async def voice(file: UploadFile = File(...), session_id: str = Form("demo"),
     if not heard:
         raise HTTPException(422, "Didn't catch that. Please try again.")
     return {"heard": heard, **await _answer(heard, session_id, speak)}
+
+
+
+# ---------- Shield teammate (ops) ----------
+@app.get("/ops")
+def ops():
+    return FileResponse("static/ops.html")
+
+
+@app.get("/shield/state")
+def shield_state_api():
+    return shield_state()
+
+
+@app.post("/shield/run")
+async def shield_run():
+    result = await run_in_threadpool(run_shift)
+    return {**result, **await run_in_threadpool(shield_state)}
+
+
+@app.post("/shield/reset")
+def shield_reset():
+    """Reset demo data so the shift can be shown again."""
+    import scripts.seed as seed
+    importlib.reload(seed).main()  # reload so seed times are relative to now
+    return shield_state()
 
 
 from fastapi import Request

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Penalty Shield · Ops</title>
+<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EEF2F7;--card:#fff;--soft:#F5F8FC;--ink:#10223A;--muted:#5A6B82;--line:#D9E1EC;--blue:#1F5FD6;--blue-soft:#E3ECFC;
+--amber:#B7790A;--amber-soft:#FCF1DA;--red:#C53A3A;--red-soft:#FBE4E4;--green:#17855A;--green-soft:#DDF3E9;--on:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#0C1626;--card:#132238;--soft:#182A44;--ink:#E6EDF7;--muted:#9AAAC0;--line:#2A3D59;
+--blue:#6E9DF2;--blue-soft:#1C3156;--amber:#E9B44C;--amber-soft:#3A2E14;--red:#EE7C7C;--red-soft:#3D1F24;--green:#4CC994;--green-soft:#16362B;--on:#0C1626}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Mukta,system-ui,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 18px 40px}
+.top{display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:1.9rem;font-weight:800;line-height:1.1}
+.sub{margin:2px 0 0;color:var(--muted)}
+.top a{color:var(--blue);font-weight:500;text-decoration:none}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px}
+.stat .n{font-size:2rem;font-weight:800;line-height:1.1}
+.stat .l{color:var(--muted);font-size:.9rem}
+.stat.good .n{color:var(--green)}
+.grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.head h2{margin:0;font-size:1.1rem}
+.btns{display:flex;gap:8px}
+button{font:inherit;font-weight:700;border:none;border-radius:12px;padding:10px 16px;cursor:pointer}
+#start{background:var(--blue);color:var(--on)}
+#reset{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
+button[disabled]{opacity:.55;cursor:default}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:600px;font-size:.95rem}
+th{text-align:left;font-weight:500;color:var(--muted);font-size:.84rem;padding:9px 12px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr.flash td{background:var(--blue-soft)}
+.amt{font-weight:700}
+.muted{color:var(--muted);font-size:.84rem}
+.bar{height:6px;border-radius:3px;background:var(--soft);overflow:hidden;margin-top:4px;min-width:90px}
+.bar span{display:block;height:100%}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:.84rem;font-weight:500;white-space:nowrap}
+.late{background:var(--red-soft);color:var(--red)}.urgent{background:var(--amber-soft);color:var(--amber)}
+.watch{background:var(--blue-soft);color:var(--blue)}.done{background:var(--green-soft);color:var(--green)}
+#feed{list-style:none;margin:0;padding:12px 16px;display:flex;flex-direction:column;gap:8px;max-height:460px;overflow-y:auto}
+#feed li{padding:8px 10px;border-radius:10px;background:var(--soft);font-size:.93rem}
+#feed li b{font-weight:700}
+#feed .err{color:var(--muted)}
+.empty{color:var(--muted)}
+#report{margin:0 16px 16px;padding:12px 14px;border-left:4px solid var(--green);background:var(--green-soft);border-radius:0 12px 12px 0;display:none;white-space:pre-wrap}
+#status{color:var(--muted);font-size:.9rem;padding:0 16px 12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>Penalty Shield</h1><p class="sub">Ops view · the Shield teammate fixes stuck payments before the RBI deadline</p></div>
+    <a href="/">← Resolver (customer view)</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat good"><div class="n" id="sFixed">0</div><div class="l">Fixed without a human</div></div>
+    <div class="stat good"><div class="n" id="sSaved">₹0</div><div class="l">Penalty avoided</div></div>
+    <div class="stat"><div class="n" id="sComp">₹0</div><div class="l">Compensation paid</div></div>
+    <div class="stat"><div class="n" id="sNotified">0</div><div class="l">Customers told</div></div>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <div class="head"><h2>Stuck payments</h2>
+        <div class="btns"><button id="reset">Reset demo</button><button id="start">Start shift</button></div></div>
+      <div class="tw"><table>
+        <thead><tr><th>Payment</th><th>Customer</th><th>Stuck at</th><th>Time left</th><th>Status</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="head"><h2>Shield’s actions</h2></div>
+      <ul id="feed"><li class="empty">Press <b>Start shift</b>. Shield will scan every stuck payment and act on its own.</li></ul>
+      <div id="report"></div>
+      <div id="status"></div>
+    </section>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const rupee = n => "₹" + Number(n).toLocaleString("en-IN");
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+function pill(p) {
+  if (p.status === "repushed") return ["done", "Re-pushed"];
+  if (p.status === "reversed") return ["done", "Refunded + comp"];
+  if (p.hours_left <= 0) return ["late", "Deadline missed"];
+  if (p.hours_left <= 12) return ["urgent", "Urgent"];
+  return ["watch", "Watching"];
+}
+
+function render(data, flashId) {
+  const s = data.stats;
+  $("sFixed").textContent = s.fixed_without_human;
+  $("sSaved").textContent = rupee(s.penalty_avoided);
+  $("sComp").textContent = rupee(s.compensation_paid);
+  $("sNotified").textContent = s.customers_notified;
+  const body = $("rows"); body.innerHTML = "";
+  for (const p of data.payments) {
+    const [cls, label] = pill(p);
+    const fixed = cls === "done";
+    const pct = fixed ? 100 : Math.max(0, Math.min(100, p.hours_left / 24 * 100));
+    const color = fixed ? "var(--green)" : p.hours_left <= 0 ? "var(--red)" : p.hours_left <= 12 ? "var(--amber)" : "var(--blue)";
+    const left = fixed ? "Done" : p.hours_left <= 0 ? `${Math.abs(p.hours_left)}h late` : `${p.hours_left}h left`;
+    const tr = document.createElement("tr");
+    if (p.txn_id === flashId) tr.className = "flash";
+    tr.innerHTML = `<td><span class="amt"></span><div class="muted"></div></td><td></td><td></td>
+      <td><span></span><div class="bar"><span></span></div></td><td><span class="pill ${cls}"></span></td>`;
+    const td = tr.children;
+    td[0].querySelector(".amt").textContent = rupee(p.amount);
+    td[0].querySelector(".muted").textContent = p.txn_id;
+    td[1].textContent = p.customer;
+    td[2].textContent = p.stage;
+    td[3].firstElementChild.textContent = left;
+    const bar = td[3].querySelector(".bar span"); bar.style.width = pct + "%"; bar.style.background = color;
+    td[4].firstElementChild.textContent = label;
+    body.appendChild(tr);
+  }
+}
+
+function describe(a) {
+  const r = a.result || {}, id = a.args.txn_id || "";
+  if (r.error) return [`Skipped ${id}: ${r.error}`, true];
+  switch (a.tool) {
+    case "list_stuck_payments": return [`🔍 Scanned <b>${r.count}</b> stuck payments`];
+    case "repush_payment": return [`⚡ Re-pushed <b>${id}</b> with ${r.hours_left}h left · penalty avoided`];
+    case "pay_compensation": return [`💸 Refunded <b>${id}</b> + <b>${rupee(r.compensation_inr)}</b> compensation (${r.days_late} day late)`];
+    case "notify_customer": return [`📩 Told ${r.sent_to}: “${esc(a.args.message || "")}”`];
+    case "escalate": return [`🧑‍💼 Escalated <b>${id}</b> to a human (${r.ticket})`];
+    default: return [`${a.tool} ${id}`];
+  }
+}
+const esc = t => t.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+async function call(url, method = "GET") {
+  const r = await fetch(url, { method });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.detail || "Request failed");
+  return data;
+}
+
+$("start").onclick = async () => {
+  $("start").disabled = $("reset").disabled = true;
+  $("start").textContent = "Shield is working…";
+  $("feed").innerHTML = ""; $("report").style.display = "none"; $("status").textContent = "";
+  try {
+    const data = await call("/shield/run", "POST");
+    for (const a of data.actions) {
+      const [html, isErr] = describe(a);
+      const li = document.createElement("li"); li.innerHTML = html; if (isErr) li.className = "err";
+      $("feed").appendChild(li); $("feed").scrollTop = 1e9;
+      await wait(450);
+    }
+    render(data);
+    if (data.report) { $("report").textContent = "Shift report: " + data.report; $("report").style.display = "block"; }
+    $("status").textContent = `Shift finished in ${data.seconds}s with no human involved.`;
+  } catch (e) {
+    $("status").textContent = "Error: " + e.message;
+  } finally {
+    $("start").disabled = $("reset").disabled = false; $("start").textContent = "Start shift";
+  }
+};
+
+$("reset").onclick = async () => {
+  $("reset").disabled = true;
+  try { render(await call("/shield/reset", "POST")); $("feed").innerHTML = '<li class="empty">Demo reset. Press <b>Start shift</b>.</li>'; $("report").style.display = "none"; $("status").textContent = ""; }
+  catch (e) { $("status").textContent = "Error: " + e.message; }
+  finally { $("reset").disabled = false; }
+};
+
+call("/shield/state").then(d => render(d)).catch(e => $("status").textContent = "Error: " + e.message);
+</script>
+</body>
+</html>
