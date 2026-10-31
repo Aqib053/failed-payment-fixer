@@ -52,3 +52,13 @@ async def voice(file: UploadFile = File(...), session_id: str = Form("demo"),
     if not heard:
         raise HTTPException(422, "Didn't catch that. Please try again.")
     return {"heard": heard, **await _answer(heard, session_id, speak)}
+
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(Exception)
+async def any_error(request: Request, exc: Exception):
+    """Show the real error in the UI instead of a blank crash."""
+    return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"})
