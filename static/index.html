@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Failed Payment Fixer</title>
+<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EEF2F7;--card:#fff;--soft:#F5F8FC;--ink:#10223A;--muted:#5A6B82;--line:#D9E1EC;--blue:#1F5FD6;--red:#C53A3A;--green:#17855A;--on:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#0C1626;--card:#132238;--soft:#182A44;--ink:#E6EDF7;--muted:#9AAAC0;--line:#2A3D59;--blue:#6E9DF2;--red:#EE7C7C;--green:#4CC994;--on:#0C1626}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.5 Mukta,system-ui,sans-serif}
+.wrap{max-width:560px;margin:0 auto;padding:24px 16px}
+h1{margin:0;font-size:1.9rem;font-weight:800}
+.sub{margin:2px 0 16px;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+#chat{height:52vh;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:88%;padding:10px 14px;border-radius:16px}
+.me{align-self:flex-end;background:var(--blue);color:var(--on);border-bottom-right-radius:4px}
+.bot{align-self:flex-start;background:var(--soft);border:1px solid var(--line);border-bottom-left-radius:4px}
+.steps{margin:8px 0 0;padding:8px 0 0;border-top:1px dashed var(--line);font-size:.85rem;color:var(--muted);list-style:none}
+.steps li::before{content:"✓ ";color:var(--green);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:8px;padding:0 16px 8px}
+.chip{border:1px solid var(--line);background:var(--soft);border-radius:99px;padding:4px 12px;cursor:pointer;font:inherit;font-size:.9rem;color:inherit}
+.bar{display:flex;gap:10px;align-items:center;padding:12px 16px 16px}
+#mic{width:72px;height:72px;border-radius:50%;border:none;background:var(--blue);color:var(--on);font-size:1.8rem;cursor:pointer;flex:none}
+#mic.rec{background:var(--red)}
+#text{flex:1;min-width:0;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--soft);color:inherit;font:inherit}
+#send{padding:12px 16px;border-radius:12px;border:none;background:var(--ink);color:var(--card);font:inherit;font-weight:700;cursor:pointer}
+.status{display:flex;justify-content:space-between;padding:0 16px 14px;color:var(--muted);font-size:.88rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Failed Payment Fixer</h1>
+  <p class="sub">Resolver teammate · speak in Hindi</p>
+  <div class="card">
+    <div id="chat"></div>
+    <div class="chips" id="chips"></div>
+    <div class="bar">
+      <button id="mic" aria-label="Tap to speak">🎤</button>
+      <input id="text" placeholder="Or type here">
+      <button id="send">Send</button>
+    </div>
+    <div class="status"><span id="status">Tap the mic, speak, tap again to send.</span>
+      <label><input type="checkbox" id="speak" checked> Voice reply</label></div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const session = "s-" + Math.random().toString(36).slice(2, 8);
+let busy = false;
+
+function bubble(cls, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls; d.textContent = text;
+  $("chat").appendChild(d); $("chat").scrollTop = 1e9;
+  return d;
+}
+
+function showReply(el, data) {
+  el.textContent = data.show;
+  if (data.steps?.length) {
+    const ul = document.createElement("ul"); ul.className = "steps";
+    data.steps.forEach(s => { const li = document.createElement("li"); li.textContent = s.tool; ul.appendChild(li); });
+    el.appendChild(ul);
+  }
+  $("status").textContent = `Answered in ${data.seconds}s`;
+  if (data.audio) new Audio("data:audio/wav;base64," + data.audio).play();
+}
+
+async function send(url, options, userText) {
+  if (busy) return; busy = true;
+  const me = userText ? bubble("me", userText) : null;
+  const bot = bubble("bot", "Check kar raha hoon…");
+  try {
+    const r = await fetch(url, options);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "Something went wrong");
+    if (data.heard) (me || bubble("me", data.heard)).textContent = data.heard;
+    showReply(bot, data);
+  } catch (e) {
+    bot.textContent = "Maaf kijiye, dobara try karein. (" + e.message + ")";
+  } finally { busy = false; }
+}
+
+function sendText(t) {
+  t = t.trim(); if (!t) return;
+  send("/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: t, session_id: session, speak: $("speak").checked }) }, t);
+}
+$("send").onclick = () => { sendText($("text").value); $("text").value = ""; };
+$("text").onkeydown = e => { if (e.key === "Enter") $("send").click(); };
+["₹2000 kat gaye, paise nahi pahunche", "Mera 1200 ka refund kab aayega?", "450 ka Swiggy payment hua ya nahi?"]
+  .forEach(p => { const b = document.createElement("button"); b.className = "chip"; b.textContent = p; b.onclick = () => sendText(p); $("chips").appendChild(b); });
+
+// ---- Voice: record, convert to 16 kHz mono WAV, send to /voice ----
+let recorder, chunks = [];
+$("mic").onclick = async () => {
+  if (busy) return;
+  if (recorder?.state === "recording") { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream); chunks = [];
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      $("mic").classList.remove("rec"); $("status").textContent = "Samajh raha hoon…";
+      const wav = await toWav(new Blob(chunks));
+      const form = new FormData();
+      form.append("file", wav, "speech.wav");
+      form.append("session_id", session);
+      form.append("speak", $("speak").checked);
+      send("/voice", { method: "POST", body: form });
+    };
+    recorder.start(); $("mic").classList.add("rec"); $("status").textContent = "Sun raha hoon… tap again to send";
+  } catch { $("status").textContent = "Mic blocked. Allow mic access, or type below."; }
+};
+
+async function toWav(blob) {
+  const raw = await new AudioContext().decodeAudioData(await blob.arrayBuffer());
+  const rate = 16000;
+  const off = new OfflineAudioContext(1, Math.ceil(raw.duration * rate), rate);
+  const src = off.createBufferSource(); src.buffer = raw; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  const buf = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(buf);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); v.setUint32(4, 36 + pcm.length * 2, true); w(8, "WAVEfmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, "data"); v.setUint32(40, pcm.length * 2, true);
+  pcm.forEach((s, i) => v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, s)) * 0x7fff, true));
+  return new Blob([buf], { type: "audio/wav" });
+}
+</script>
+</body>
+</html>
