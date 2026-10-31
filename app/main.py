@@ -21,7 +21,10 @@ class ChatIn(BaseModel):
 
 
 async def _answer(message: str, session_id: str, speak: bool) -> dict:
-    result = await run_in_threadpool(run_resolver, message, session_id)
+    try:
+        result = await run_in_threadpool(run_resolver, message, session_id)
+    except httpx.RemoteProtocolError:  # Supabase dropped an idle connection; retry once
+        result = await run_in_threadpool(run_resolver, message, session_id)
     result["audio"] = None
     if speak and result["show"]:
         result["say"] = await run_in_threadpool(to_devanagari, result["show"])
@@ -73,7 +76,10 @@ def shield_state_api():
 
 @app.post("/shield/run")
 async def shield_run():
-    result = await run_in_threadpool(run_shift)
+    try:
+        result = await run_in_threadpool(run_shift)
+    except httpx.RemoteProtocolError:  # Supabase dropped an idle connection; retry once
+        result = await run_in_threadpool(run_shift)
     return {**result, **await run_in_threadpool(shield_state)}
 
 
