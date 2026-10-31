@@ -111,7 +111,7 @@ $("mic").onclick = async () => {
       form.append("file", wav, "speech.wav");
       form.append("session_id", session);
       form.append("speak", $("speak").checked);
-      send("/voice", { method: "POST", body: form });
+      send("/voice", { method: "POST", body: form }, "🎤 …");
     };
     recorder.start(); $("mic").classList.add("rec"); $("status").textContent = "Sun raha hoon… tap again to send";
   } catch { $("status").textContent = "Mic blocked. Allow mic access, or type below."; }

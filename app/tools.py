@@ -6,6 +6,20 @@ from langchain_core.tools import tool
 
 from app import config
 from app.db import db
+import contextvars
+
+# Amounts the customer mentioned in the current message (set by the agent per request).
+MENTIONED_AMOUNTS: contextvars.ContextVar[tuple] = contextvars.ContextVar("mentioned_amounts", default=())
+
+
+def _mismatch(t: dict) -> dict | None:
+    """Block actions on a payment whose amount the customer never mentioned."""
+    said = MENTIONED_AMOUNTS.get()
+    amount = int(float(t["amount"]))
+    if said and amount not in said:
+        return {"error": f"Customer mentioned Rs {', '.join(map(str, said))}, but {t['id']} is Rs {amount}. "
+                         "Do not act on it. Tell the customer no such payment was found and ask which one they mean."}
+    return None
 
 HI_MONTHS = ["जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून",
              "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"]
@@ -106,6 +120,10 @@ def escalate_to_human(txn_id: str, summary: str) -> dict:
     """Send a late or unusual case to a human agent, with a short summary.
     Returns the ticket number."""
     t = _get(txn_id)
+    if (blocked := _mismatch(t)):
+        return blocked
+    if (blocked := _mismatch(t)):
+        return blocked
     return {"ticket": _ticket(t["id"], "escalation", summary[:300])}
 
 

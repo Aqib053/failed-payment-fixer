@@ -14,7 +14,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app import config
-from app.tools import TOOLS
+from app.tools import MENTIONED_AMOUNTS, TOOLS
 
 
 @tool
@@ -109,11 +109,27 @@ def _parse(raw: str) -> dict:
         return {"show": raw, "say": raw}
 
 
+_DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+
+
+def amounts_in(text: str) -> tuple:
+    """Rupee amounts in what the customer said, e.g. '₹100 ka payment' -> (100,)."""
+    t = text.translate(_DEVANAGARI_DIGITS).replace(",", "")
+    return tuple(int(x) for x in re.findall(r"\d+", t) if 10 <= int(x) <= 1_000_000)
+
+
 def run_resolver(message: str, session_id: str) -> dict:
     cfg = {"configurable": {"thread_id": session_id}}
     before = len(resolver.get_state(cfg).values.get("messages", []))
     start = time.perf_counter()
-    result = resolver.invoke({"messages": [HumanMessage(message)]}, cfg)
+    said = amounts_in(message)
+    hint = (f"\n\n[Note: customer mentioned amount(s): {', '.join(map(str, said))}. "
+            "Pass it to find_transactions and only act on a payment with this amount.]") if said else ""
+    token = MENTIONED_AMOUNTS.set(said)
+    try:
+        result = resolver.invoke({"messages": [HumanMessage(message + hint)]}, cfg)
+    finally:
+        MENTIONED_AMOUNTS.reset(token)
     new = result["messages"][before:]
     calls = [c for m in new if isinstance(m, AIMessage) for c in m.tool_calls]
     steps = [{"tool": c["name"], "args": c["args"]} for c in calls if c["name"] != "reply"]
